@@ -7,3 +7,7 @@
 - [ ] Includes link to acceptance pack (CI artifact) if relevant
 
 > Notes:
+
+---
+**Reviews**
+- [ ] At least 1 approval (auto-requested by CODEOWNERS)
