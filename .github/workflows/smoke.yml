@@ -1,0 +1,31 @@
+name: Smoke (Acceptance)
+on:
+  pull_request:
+    branches: [ lab ]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run smoke against public server
+        env:
+          TARGET_HOST: 99.76.234.25
+        run: |
+          mkdir -p storage/acceptance
+          node ops/tests/acceptance/smoke.mjs
+
+      - name: Upload acceptance JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-latest
+          path: storage/acceptance/latest.json
+          retention-days: 7
