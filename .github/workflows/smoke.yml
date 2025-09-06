@@ -1,12 +1,21 @@
 name: Smoke (Acceptance)
+
 on:
   pull_request:
     branches: [ lab ]
 
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      TARGET_HOST: http://99.76.234.25
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,14 +25,18 @@ jobs:
         with:
           node-version: 20
 
-      - name: Run smoke against public server
-        env:
-          TARGET_HOST: 99.76.234.25
+      - name: Prepare acceptance directory
         run: |
+          set -e
+          # If a FILE named "storage" exists, remove it so we can create a folder
+          if [ -f storage ]; then rm -f storage; fi
           mkdir -p storage/acceptance
-          node ops/tests/acceptance/smoke.mjs
+
+      - name: Run smoke against public server
+        run: node ops/tests/acceptance/smoke.mjs
 
       - name: Upload acceptance JSON
+        if: always()  # still upload even if smoke fails
         uses: actions/upload-artifact@v4
         with:
           name: acceptance-latest
