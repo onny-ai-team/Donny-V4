@@ -28,7 +28,7 @@ jobs:
       - name: Prepare acceptance directory
         run: |
           set -e
-          if [ -f storage ]; then rm -f storage; fi
+          rm -rf storage
           mkdir -p storage/acceptance
 
       - name: Run smoke against public server
