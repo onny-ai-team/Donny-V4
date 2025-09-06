@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      TARGET_HOST: http://99.76.234.25
+      TARGET_HOST: 99.76.234.25
 
     steps:
       - name: Checkout
@@ -28,15 +28,14 @@ jobs:
       - name: Prepare acceptance directory
         run: |
           set -e
-          # If a FILE named "storage" exists, remove it so we can create a folder
-          if [ -f storage ]; then rm -f storage; fi
+          rm -rf storage
           mkdir -p storage/acceptance
 
       - name: Run smoke against public server
         run: node ops/tests/acceptance/smoke.mjs
 
       - name: Upload acceptance JSON
-        if: always()  # still upload even if smoke fails
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: acceptance-latest
