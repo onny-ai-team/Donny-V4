@@ -56,7 +56,7 @@ Donny-V4/
 - Branches:  
   - `main` → Production  
   - `lab` → Testing  
-- Both branches pushed to GitHub: https://github.com/harrynanre/Donny-V4
+- Both branches pushed to GitHub: https://github.com/donny-ai-team/Donny-V4
 
 ---
 
