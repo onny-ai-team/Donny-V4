@@ -8,17 +8,66 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
   toggle:
     if: github.event.label.name == 'freeze-lab'
     runs-on: ubuntu-latest
     steps:
+      - name: Validate PAT and permissions
+        id: validate
+        run: |
+          if [ -z "${{ secrets.FREEZE_BOT_PAT }}" ]; then
+            echo "::error::FREEZE_BOT_PAT secret is not configured"
+            echo "missing_pat=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "missing_pat=false" >> $GITHUB_OUTPUT
+          echo "PAT secret is configured"
+
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.FREEZE_BOT_PAT || secrets.GITHUB_TOKEN }}
+          ref: lab
+
+      - name: Test push permissions
+        id: test-push
+        continue-on-error: true
+        run: |
+          git config user.name "freeze-bot"
+          git config user.email "freeze-bot@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.FREEZE_BOT_PAT }}@github.com/${{ github.repository }}.git"
+          
+          # Create a test branch to verify push permissions
+          TEST_BRANCH="freeze-test-${{ github.run_id }}"
+          git checkout -b $TEST_BRANCH
+          echo "test" > .freeze-test
+          git add .freeze-test
+          git commit -m "test: verify freeze bot permissions"
+          
+          # Try to push and capture result
+          if git push origin $TEST_BRANCH 2>push_error.txt; then
+            echo "push_allowed=true" >> $GITHUB_OUTPUT
+            # Clean up test branch
+            git push origin --delete $TEST_BRANCH || true
+          else
+            echo "push_allowed=false" >> $GITHUB_OUTPUT
+            cat push_error.txt
+          fi
+          
+          # Return to lab branch
+          git checkout lab
+
+      - name: Check permissions result
+        if: steps.test-push.outputs.push_allowed == 'false'
+        run: |
+          echo "::error::Freeze toggle cannot push to protected branch. Ensure PAT has ruleset:bypass and the PAT user is listed as a Bypass actor on ruleset 'Protect lab'."
+          exit 1
 
       - name: Process freeze toggle
+        id: toggle
         uses: actions/github-script@v7
         with:
           script: |
@@ -36,21 +85,46 @@ jobs:
             const fs = require('fs');
             fs.writeFileSync('.ops/lab-freeze.json', JSON.stringify(data, null, 2));
             
+            core.setOutput('frozen', isFreezing);
+            core.setOutput('actor', actor);
             core.info(`Lab freeze ${isFreezing ? 'ACTIVATED' : 'DEACTIVATED'} by ${actor}`);
 
-      - name: Commit freeze state
+      - name: Commit and push freeze state
+        id: push
+        continue-on-error: true
         run: |
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
+          git config user.name "freeze-bot"
+          git config user.email "freeze-bot@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.FREEZE_BOT_PAT }}@github.com/${{ github.repository }}.git"
+          
+          # Fetch latest and ensure we're on lab
+          git fetch origin lab
+          git checkout lab
+          git pull origin lab
+          
+          # Stage and commit the freeze state change
           git add .ops/lab-freeze.json
           if git diff --staged --quiet; then
             echo "No changes to commit"
+            echo "pushed=skipped" >> $GITHUB_OUTPUT
           else
-            git commit -m "Toggle freeze: ${{ github.event.action == 'labeled' && 'ON' || 'OFF' }} by @${{ github.actor }}"
-            git push
+            FROZEN_STATE=$(jq -r .frozen .ops/lab-freeze.json)
+            git commit -m "freeze: set to $FROZEN_STATE by ${{ steps.toggle.outputs.actor }}"
+            
+            # Push with error capture
+            if git push origin lab 2>push_error.txt; then
+              echo "pushed=success" >> $GITHUB_OUTPUT
+              echo "Push successful"
+            else
+              echo "pushed=failed" >> $GITHUB_OUTPUT
+              echo "error_message=$(cat push_error.txt | head -n 1)" >> $GITHUB_OUTPUT
+              cat push_error.txt
+              exit 1
+            fi
           fi
 
-      - name: Comment on trigger
+      - name: Comment on trigger - Success
+        if: steps.push.outcome == 'success'
         uses: actions/github-script@v7
         with:
           script: |
@@ -58,6 +132,27 @@ jobs:
             const body = isFreezing 
               ? `🔴 **Lab freeze ACTIVATED** by @${context.actor}\n\nAll merges to \`lab\` are now blocked. Remove the \`freeze-lab\` label from this issue/PR to unfreeze.`
               : `🟢 **Lab freeze DEACTIVATED** by @${context.actor}\n\nMerges to \`lab\` are now allowed.`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      - name: Comment on trigger - Failure
+        if: steps.push.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `❌ **Freeze toggle failed**: unable to push to protected \`lab\`.\n\n` +
+              `**Fix required:**\n` +
+              `1. Create a Fine-grained PAT with:\n` +
+              `   - Repository access → this repo → Contents: Read/Write\n` +
+              `   - **Rulesets: Bypass** permission\n` +
+              `2. Add the PAT as repository secret: \`FREEZE_BOT_PAT\`\n` +
+              `3. Add the PAT owner as **Bypass actor** in ruleset **"Protect lab"**\n\n` +
+              `After updating, re-apply or remove the \`freeze-lab\` label to retry.`;
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
