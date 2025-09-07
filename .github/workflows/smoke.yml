@@ -33,7 +33,7 @@ jobs:
           mkdir -p storage/acceptance
 
       - name: Run smoke against public server
-        run: node ops/tests/acceptance/smoke.mjs
+        run: node ops/tests/acceptance/smoke-fail.mjs
 
       - name: Upload acceptance JSON
         if: always()
