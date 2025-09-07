@@ -1,0 +1,67 @@
+name: Freeze Toggle
+
+on:
+  issues:
+    types: [labeled, unlabeled]
+  pull_request_target:
+    types: [labeled, unlabeled]
+
+permissions:
+  contents: write
+
+jobs:
+  toggle:
+    if: github.event.label.name == 'freeze-lab'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Process freeze toggle
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const action = context.payload.action;
+            const actor = context.actor;
+            const isFreezing = (action === 'labeled');
+            
+            const data = {
+              frozen: isFreezing,
+              reason: isFreezing ? `Label applied to #${context.issue.number}` : '',
+              by: isFreezing ? actor : '',
+              at: isFreezing ? new Date().toISOString() : ''
+            };
+            
+            const fs = require('fs');
+            fs.writeFileSync('.ops/lab-freeze.json', JSON.stringify(data, null, 2));
+            
+            core.info(`Lab freeze ${isFreezing ? 'ACTIVATED' : 'DEACTIVATED'} by ${actor}`);
+
+      - name: Commit freeze state
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git add .ops/lab-freeze.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Toggle freeze: ${{ github.event.action == 'labeled' && 'ON' || 'OFF' }} by @${{ github.actor }}"
+            git push
+          fi
+
+      - name: Comment on trigger
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isFreezing = (context.payload.action === 'labeled');
+            const body = isFreezing 
+              ? `🔴 **Lab freeze ACTIVATED** by @${context.actor}\n\nAll merges to \`lab\` are now blocked. Remove the \`freeze-lab\` label from this issue/PR to unfreeze.`
+              : `🟢 **Lab freeze DEACTIVATED** by @${context.actor}\n\nMerges to \`lab\` are now allowed.`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });

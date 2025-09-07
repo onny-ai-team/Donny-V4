@@ -36,7 +36,14 @@ jobs:
               core.setFailed('Repo setting "Allow auto-merge" is OFF. Enable it in Settings → General → Pull Requests to use bot auto-merge.');
             }
 
-      - name: Gate: base=lab & label=auto-merge
+      - name: Check freeze status
+        uses: actions/checkout@v4
+        with:
+          ref: lab
+          sparse-checkout: |
+            .ops/lab-freeze.json
+
+      - name: Gate: base=lab & label=auto-merge & not frozen
         uses: actions/github-script@v7
         id: gate
         with:
@@ -44,8 +51,21 @@ jobs:
             const pr = context.payload.pull_request;
             const hasLabel = pr.labels.some(l => l.name === 'auto-merge');
             const baseOk  = pr.base.ref === 'lab';
-            core.setOutput('go', (hasLabel && baseOk) ? 'true' : 'false');
+            
+            // Check freeze status
+            let frozen = false;
+            const fs = require('fs');
+            if (fs.existsSync('.ops/lab-freeze.json')) {
+              const freeze = JSON.parse(fs.readFileSync('.ops/lab-freeze.json', 'utf8'));
+              frozen = freeze.frozen;
+              if (frozen) {
+                core.warning(`Lab is frozen: ${freeze.reason}`);
+              }
+            }
+            
+            core.setOutput('go', (hasLabel && baseOk && !frozen) ? 'true' : 'false');
             core.setOutput('number', pr.number.toString());
+            core.setOutput('frozen', frozen ? 'true' : 'false');
 
       - name: Enable auto-merge
         if: steps.gate.outputs.go == 'true'
@@ -55,16 +75,21 @@ jobs:
           merge-method: squash
 
       - name: Comment result
-        if: steps.gate.outputs.go == 'true'
+        if: steps.gate.outputs.go == 'true' || steps.gate.outputs.frozen == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const number = Number('${{ steps.gate.outputs.number }}');
+            const frozen = '${{ steps.gate.outputs.frozen }}' === 'true';
+            const body = frozen
+              ? "🔴 Auto-merge **blocked**: Lab is currently frozen. Remove the freeze to allow merges."
+              : "🔁 Auto-merge **enabled** (label: `auto-merge`). GitHub will merge once all required checks are green, 1+ approval exists, and the branch is up-to-date.";
+            
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: number,
-              body: "🔁 Auto-merge **enabled** (label: `auto-merge`). GitHub will merge once all required checks are green, 1+ approval exists, and the branch is up-to-date."
+              body: body
             });
 
   # --- Path 2: after Smoke finishes successfully, (re)attempt enabling auto-merge ---
@@ -72,7 +97,31 @@ jobs:
     if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Check freeze status
+        uses: actions/checkout@v4
+        with:
+          ref: lab
+          sparse-checkout: |
+            .ops/lab-freeze.json
+
+      - name: Abort if frozen
+        id: freeze-check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('.ops/lab-freeze.json')) {
+              const freeze = JSON.parse(fs.readFileSync('.ops/lab-freeze.json', 'utf8'));
+              if (freeze.frozen) {
+                core.warning(`Skipping auto-merge: Lab is frozen (${freeze.reason})`);
+                core.setOutput('skip', 'true');
+                return;
+              }
+            }
+            core.setOutput('skip', 'false');
+
       - name: Find candidate PRs for this SHA
+        if: ${{ steps.freeze-check.outputs.skip != 'true' }}
         id: find
         uses: actions/github-script@v7
         with:
@@ -92,7 +141,7 @@ jobs:
             core.setOutput('numbers', JSON.stringify(candidates));
 
       - name: Enable auto-merge on each candidate
-        if: ${{ steps.find.outputs.numbers != '[]' }}
+        if: ${{ steps.find.outputs.numbers != '[]' && steps.freeze-check.outputs.skip != 'true' }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -106,7 +155,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Comment summary
-        if: ${{ steps.find.outputs.numbers != '[]' }}
+        if: ${{ steps.find.outputs.numbers != '[]' && steps.freeze-check.outputs.skip != 'true' }}
         uses: actions/github-script@v7
         with:
           script: |

@@ -1,0 +1,57 @@
+name: Freeze Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [lab]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lab
+
+      - name: Check freeze status
+        id: freeze
+        run: |
+          if [ -f .ops/lab-freeze.json ]; then
+            FROZEN=$(jq -r '.frozen' .ops/lab-freeze.json)
+            REASON=$(jq -r '.reason' .ops/lab-freeze.json)
+            BY=$(jq -r '.by' .ops/lab-freeze.json)
+            AT=$(jq -r '.at' .ops/lab-freeze.json)
+            echo "frozen=$FROZEN" >> $GITHUB_OUTPUT
+            echo "reason=$REASON" >> $GITHUB_OUTPUT
+            echo "by=$BY" >> $GITHUB_OUTPUT
+            echo "at=$AT" >> $GITHUB_OUTPUT
+          else
+            echo "frozen=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Report status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const frozen = '${{ steps.freeze.outputs.frozen }}' === 'true';
+            const state = frozen ? 'failure' : 'success';
+            const description = frozen 
+              ? `Frozen by ${{ steps.freeze.outputs.by }}: ${{ steps.freeze.outputs.reason }}`
+              : 'Lab is open for merges';
+            
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: state,
+              context: 'Freeze Gate',
+              description: description.substring(0, 140)
+            });
+            
+            if (frozen) {
+              core.setFailed(`Lab is frozen. ${description}`);
+            }
