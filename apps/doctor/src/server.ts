@@ -2,6 +2,7 @@ import express from "express";
 import { packsHtml } from "./packsRoute";
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 
 const app = express();
 const PORT = process.env.PORT || 5056;
@@ -19,6 +20,76 @@ app.get("/lab/api/packs/latest", (_req, res) => {
     res.type("application/json").send(raw);
   } catch (e: any) {
     res.status(404).json({error:"latest.json not found"});
+  }
+});
+
+// --- Gate Status Endpoint ---
+app.get("/lab/gate/status", (_req, res) => {
+  try {
+    // Read the latest acceptance pack
+    const packPath = path.join(__dirname, "../../../storage/acceptance/latest.json");
+    const raw = fs.readFileSync(packPath, "utf8");
+    const pack = JSON.parse(raw);
+    
+    // Get the latest git SHA
+    let sha = "unknown";
+    try {
+      sha = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+    } catch {}
+    
+    // Build status response
+    const status = {
+      ok: pack.pass === true,
+      sha: sha,
+      when: pack.generatedAt || new Date().toISOString(),
+      prUrl: pack.prUrl || null
+    };
+    
+    // Append to history file for sparkline
+    const historyPath = path.join(__dirname, "../../../storage/acceptance/history.jsonl");
+    const historyEntry = JSON.stringify({
+      ...status,
+      timestamp: new Date().toISOString()
+    }) + "\n";
+    
+    try {
+      fs.appendFileSync(historyPath, historyEntry);
+    } catch {
+      // Create file if it doesn't exist
+      fs.writeFileSync(historyPath, historyEntry);
+    }
+    
+    res.json(status);
+  } catch (e: any) {
+    res.json({
+      ok: false,
+      sha: "unknown",
+      when: new Date().toISOString(),
+      error: "No acceptance data available"
+    });
+  }
+});
+
+// --- Gate History for Sparkline ---
+app.get("/lab/gate/history", (_req, res) => {
+  try {
+    const historyPath = path.join(__dirname, "../../../storage/acceptance/history.jsonl");
+    const lines = fs.readFileSync(historyPath, "utf8").trim().split("\n");
+    
+    // Get last 7 days of data
+    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    const history = lines
+      .filter(line => line.trim())
+      .map(line => JSON.parse(line))
+      .filter(entry => new Date(entry.timestamp).getTime() > sevenDaysAgo)
+      .map(entry => ({
+        ok: entry.ok,
+        timestamp: entry.timestamp
+      }));
+    
+    res.json(history);
+  } catch {
+    res.json([]);
   }
 });
 
@@ -41,11 +112,108 @@ function page(title: string, body: string) {
   .pill{display:inline-block;margin-right:8px;margin-top:6px;padding:6px 10px;border-radius:999px;border:1px solid var(--bd);background:#f3f4f6;font-size:12px}
   .ok{color:var(--ok);background:#ecfdf5;border-color:#bbf7d0}
   .warn{color:var(--warn);background:#fffbeb;border-color:#fde68a}
+  .bad{color:var(--bad);background:#fef2f2;border-color:#fecaca}
   .grid{display:grid;gap:12px}
   @media(min-width:880px){.grid{grid-template-columns:1fr 1fr}}
   .row{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--bd);border-radius:12px;background:#fafafa;padding:10px}
   .muted{color:var(--muted);font-size:12px}
+  .gate-status{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:16px;box-shadow:var(--shadow)}
+  .gate-pill{padding:8px 14px;border-radius:999px;font-weight:bold;font-size:13px}
+  .gate-pass{background:#10b981;color:white}
+  .gate-fail{background:#ef4444;color:white}
+  .sparkline{height:30px;flex:1;max-width:200px;display:flex;align-items:flex-end;gap:2px}
+  .spark{flex:1;min-height:2px;background:#e5e7eb;border-radius:2px;transition:all 0.2s}
+  .spark.pass{background:#10b981}
+  .spark.fail{background:#ef4444}
+  .gate-info{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .gate-link{color:#3b82f6;text-decoration:none;font-size:13px}
+  .gate-link:hover{text-decoration:underline}
 </style>
+<script>
+async function loadGateStatus() {
+  try {
+    const [statusRes, historyRes] = await Promise.all([
+      fetch('/lab/gate/status'),
+      fetch('/lab/gate/history')
+    ]);
+    const status = await statusRes.json();
+    const history = await historyRes.json();
+    
+    // Update gate pill
+    const pill = document.getElementById('gate-pill');
+    if (pill) {
+      pill.className = status.ok ? 'gate-pill gate-pass' : 'gate-pill gate-fail';
+      pill.textContent = status.ok ? 'PASS' : 'FAIL';
+    }
+    
+    // Update SHA and time
+    const info = document.getElementById('gate-info');
+    if (info) {
+      const timeAgo = getTimeAgo(status.when);
+      info.innerHTML = \`<span class="muted">SHA:</span> \${status.sha} • <span class="muted">\${timeAgo}</span>\`;
+      
+      if (!status.ok && status.prUrl) {
+        info.innerHTML += \` • <a href="\${status.prUrl}" class="gate-link" target="_blank">Open failing PR →</a>\`;
+      }
+    }
+    
+    // Update sparkline
+    const sparkline = document.getElementById('sparkline');
+    if (sparkline && history.length > 0) {
+      // Group by hour for better visualization
+      const hourlyData = {};
+      const now = Date.now();
+      
+      for (let i = 0; i < 168; i++) { // 7 days * 24 hours
+        const hour = new Date(now - (i * 60 * 60 * 1000));
+        const key = hour.toISOString().slice(0, 13); // YYYY-MM-DDTHH
+        hourlyData[key] = null;
+      }
+      
+      history.forEach(h => {
+        const key = h.timestamp.slice(0, 13);
+        if (hourlyData.hasOwnProperty(key)) {
+          // Take the last status for each hour
+          hourlyData[key] = h.ok;
+        }
+      });
+      
+      const sparks = Object.entries(hourlyData)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .slice(-50) // Show last 50 hours
+        .map(([_, ok]) => {
+          if (ok === null) return '<div class="spark"></div>';
+          const cls = ok ? 'spark pass' : 'spark fail';
+          const height = ok ? '100%' : '60%';
+          return \`<div class="\${cls}" style="height:\${height}"></div>\`;
+        })
+        .join('');
+      
+      sparkline.innerHTML = sparks;
+    }
+  } catch (e) {
+    console.error('Failed to load gate status:', e);
+  }
+}
+
+function getTimeAgo(dateStr) {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const seconds = Math.floor((now - date) / 1000);
+  
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+  if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+  return Math.floor(seconds / 86400) + 'd ago';
+}
+
+// Load gate status on page load
+if (typeof window !== 'undefined') {
+  window.addEventListener('DOMContentLoaded', loadGateStatus);
+  // Refresh every 30 seconds
+  setInterval(loadGateStatus, 30000);
+}
+</script>
 </head>
 <body>
   <div class="wrap">
@@ -56,6 +224,14 @@ function page(title: string, body: string) {
         <div class="muted">Control Tower • ${title}</div>
       </div>
     </header>
+    
+    <!-- Lab Gate Status -->
+    <div class="gate-status">
+      <div style="font-weight:bold;font-size:14px">Lab Gate</div>
+      <div id="gate-pill" class="gate-pill gate-pass">PASS</div>
+      <div id="sparkline" class="sparkline"></div>
+      <div id="gate-info" class="gate-info muted">Loading...</div>
+    </div>
 
     <nav>
       <a href="/lab/doctor/kundli">Kundli</a>
