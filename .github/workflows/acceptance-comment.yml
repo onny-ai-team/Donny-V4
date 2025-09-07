@@ -21,7 +21,15 @@ jobs:
           STATUS="${{ github.event.workflow_run.conclusion }}"
           DURA="10s"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}"
-          echo "body=**Acceptance Report**%0A• Result: **${STATUS}** in ${DURA}%0A• UI: http://99.76.234.25:5000/health%0A• API: http://99.76.234.25:5055/api/health%0A• Doctor Packs: http://99.76.234.25:5056/lab/doctor/packs%0A• CI Artifacts & logs: ${RUN_URL}" >> $GITHUB_OUTPUT
+          BODY="**Acceptance Report**
+          • Result: **${STATUS}** in ${DURA}
+          • UI: http://99.76.234.25:5000/health
+          • API: http://99.76.234.25:5055/api/health
+          • Doctor Packs: http://99.76.234.25:5056/lab/doctor/packs
+          • CI Artifacts & logs: ${RUN_URL}"
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Determine PR number
         id: find
