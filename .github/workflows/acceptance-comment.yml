@@ -28,6 +28,7 @@ jobs:
         uses: potiuk/get-workflow-origin@v1_3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          sourceRunId: ${{ github.event.workflow_run.id }}
 
       - name: Post PR comment
         if: steps.find.outputs.pullRequestNumber
