@@ -1,0 +1,121 @@
+name: Auto-merge (label: auto-merge → lab)
+
+on:
+  pull_request_target:
+    types: [labeled, reopened, synchronize, ready_for_review]
+  workflow_run:
+    workflows: ["Smoke (Acceptance)"]
+    types: [completed]
+
+permissions:
+  contents: write           # needed to (auto)merge
+  pull-requests: write      # needed to enable auto-merge
+  checks: read
+  issues: write
+
+concurrency:
+  group: automerge-${{ github.event_name }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  # --- Path 1: react immediately when a PR gets the label or is updated ---
+  pr_event:
+    if: ${{ github.event_name == 'pull_request_target' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm repo allows auto-merge (fail with advice if off)
+        uses: actions/github-script@v7
+        id: setting
+        with:
+          script: |
+            const { data: repo } = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            if (!repo.allow_auto_merge) {
+              core.setFailed('Repo setting "Allow auto-merge" is OFF. Enable it in Settings → General → Pull Requests to use bot auto-merge.');
+            }
+
+      - name: Gate: base=lab & label=auto-merge
+        uses: actions/github-script@v7
+        id: gate
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const hasLabel = pr.labels.some(l => l.name === 'auto-merge');
+            const baseOk  = pr.base.ref === 'lab';
+            core.setOutput('go', (hasLabel && baseOk) ? 'true' : 'false');
+            core.setOutput('number', pr.number.toString());
+
+      - name: Enable auto-merge
+        if: steps.gate.outputs.go == 'true'
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          pull-request-number: ${{ steps.gate.outputs.number }}
+          merge-method: squash
+
+      - name: Comment result
+        if: steps.gate.outputs.go == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const number = Number('${{ steps.gate.outputs.number }}');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              body: "🔁 Auto-merge **enabled** (label: `auto-merge`). GitHub will merge once all required checks are green, 1+ approval exists, and the branch is up-to-date."
+            });
+
+  # --- Path 2: after Smoke finishes successfully, (re)attempt enabling auto-merge ---
+  after_smoke:
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find candidate PRs for this SHA
+        id: find
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.payload.workflow_run.head_sha;
+            const { data: prs } = await github.request('GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls', {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: sha,
+              headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+            });
+            const candidates = prs.filter(pr =>
+              pr.state === 'open' &&
+              pr.base.ref === 'lab' &&
+              (pr.labels || []).some(l => l.name === 'auto-merge')
+            ).map(pr => pr.number);
+            core.setOutput('numbers', JSON.stringify(candidates));
+
+      - name: Enable auto-merge on each candidate
+        if: ${{ steps.find.outputs.numbers != '[]' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const numbers = JSON.parse(`${{ toJSON(steps.find.outputs.numbers) }}`);
+            for (const n of numbers) {
+              await exec.exec('bash', ['-lc', `gh pr merge --squash --auto "${n}"`], {
+                env: { GH_TOKEN: process.env.GITHUB_TOKEN }
+              });
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Comment summary
+        if: ${{ steps.find.outputs.numbers != '[]' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const numbers = JSON.parse(`${{ toJSON(steps.find.outputs.numbers) }}`);
+            for (const n of numbers) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: n,
+                body: "✅ Smoke passed. Auto-merge has been enabled (or merge executed if all gates already satisfied)."
+              });
+            }
