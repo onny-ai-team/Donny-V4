@@ -29,3 +29,4 @@ node ops/tests/acceptance/smoke.mjs
 - Doctor: http://localhost:5056/lab/api/browser/health
 ## Status
 All systems operational ✅
+
