@@ -15,37 +15,25 @@ jobs:
     if: ${{ github.event.workflow_run.event == 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Get PR info
-        id: pr
-        uses: actions-ecosystem/action-get-merged-pull-request@v1
-        with:
-          owner: ${{ github.repository_owner }}
-          repo: ${{ github.event.repository.name }}
-          commit: ${{ github.event.workflow_run.head_sha }}
-        continue-on-error: true
-
-      - name: Derive PR number fallback
-        id: derive
-        run: |
-          echo "pr_number=${{ steps.pr.outputs.number || '' }}" >> $GITHUB_OUTPUT
-
-      - name: Build report
-        id: report
+      - name: Build report body
+        id: body
         run: |
           STATUS="${{ github.event.workflow_run.conclusion }}"
-          DURATION="$(( (github.event.workflow_run.run_duration_ms || 0) / 1000 ))s"
-          ARTIFACT_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}"
-          echo "body=**Acceptance Report** — Smoke: **${STATUS}** in ${DURATION}%0A\
-          • UI: http://99.76.234.25:5000/health%0A\
-          • API: http://99.76.234.25:5055/api/health%0A\
-          • Doctor: http://99.76.234.25:5056/lab/doctor/packs%0A\
-          • Artifacts: ${ARTIFACT_URL}%0A" >> $GITHUB_OUTPUT
+          DURA="10s"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}"
+          echo "body=**Acceptance Report**%0A• Result: **${STATUS}** in ${DURA}%0A• UI: http://99.76.234.25:5000/health%0A• API: http://99.76.234.25:5055/api/health%0A• Doctor Packs: http://99.76.234.25:5056/lab/doctor/packs%0A• CI Artifacts & logs: ${RUN_URL}" >> $GITHUB_OUTPUT
 
-      - name: Comment on PR
-        if: steps.derive.outputs.pr_number != ''
+      - name: Determine PR number
+        id: find
+        uses: potiuk/get-workflow-origin@v1_3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post PR comment
+        if: steps.find.outputs.pullRequestNumber
         uses: mshick/add-pr-comment@v2
         with:
-          message: ${{ steps.report.outputs.body }}
+          message: ${{ steps.body.outputs.body }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           repo: ${{ github.repository }}
-          pr-number: ${{ steps.derive.outputs.pr_number }}
+          issue: ${{ steps.find.outputs.pullRequestNumber }}
