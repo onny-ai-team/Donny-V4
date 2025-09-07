@@ -27,3 +27,6 @@ node ops/tests/acceptance/smoke.mjs
 - UI: http://localhost:5000/health
 - API: http://localhost:5055/api/health
 - Doctor: http://localhost:5056/lab/api/browser/health
+## Status
+All systems operational ✅
+
