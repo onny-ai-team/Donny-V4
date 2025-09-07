@@ -8,6 +8,7 @@ permissions:
   contents: read
   actions: read
   checks: write
+  pull-requests: write
 
 jobs:
   smoke:
@@ -41,3 +42,15 @@ jobs:
           name: acceptance-latest
           path: storage/acceptance/latest.json
           retention-days: 7
+
+      - name: Add success label
+        if: success()
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          labels: ready-to-merge
+
+      - name: Add failure label
+        if: failure()
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          labels: needs-investigation
