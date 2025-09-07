@@ -8,7 +8,7 @@ Testing the freeze functionality:
 - Auto-merge should be blocked
 
 ## Test Results
-- [ ] Freeze Gate fails when frozen
-- [ ] Freeze Gate passes when unfrozen
+- [x] Freeze Gate fails when frozen ✅
+- [ ] Freeze Gate passes when unfrozen (testing now)
 - [ ] Auto-merge blocked when frozen
 - [ ] Freeze Toggle workflow updates state
