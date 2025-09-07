@@ -14,3 +14,4 @@ This file tests the branch protection configuration for `lab`:
 2. Cannot merge if Smoke fails
 3. Cannot merge if branch is out-of-date
 4. Auto-merge works when all conditions are met
+5. Cannot merge when lab is frozen (Freeze Gate fails)
