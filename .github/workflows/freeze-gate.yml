@@ -15,22 +15,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: lab
+          ref: freeze-state
+          fetch-depth: 1
 
       - name: Check freeze status
         id: freeze
         run: |
-          if [ -f .ops/lab-freeze.json ]; then
-            FROZEN=$(jq -r '.frozen' .ops/lab-freeze.json)
-            REASON=$(jq -r '.reason' .ops/lab-freeze.json)
-            BY=$(jq -r '.by' .ops/lab-freeze.json)
-            AT=$(jq -r '.at' .ops/lab-freeze.json)
+          if [ ! -f .ops/lab-freeze.json ]; then
+            echo "frozen=false" >> $GITHUB_OUTPUT
+          else
+            FROZEN=$(jq -r '.frozen // false' .ops/lab-freeze.json)
+            REASON=$(jq -r '.reason // ""' .ops/lab-freeze.json)
+            BY=$(jq -r '.by // ""' .ops/lab-freeze.json)
+            AT=$(jq -r '.at // ""' .ops/lab-freeze.json)
             echo "frozen=$FROZEN" >> $GITHUB_OUTPUT
             echo "reason=$REASON" >> $GITHUB_OUTPUT
             echo "by=$BY" >> $GITHUB_OUTPUT
             echo "at=$AT" >> $GITHUB_OUTPUT
-          else
-            echo "frozen=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Report status

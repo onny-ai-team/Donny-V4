@@ -36,12 +36,11 @@ jobs:
               core.setFailed('Repo setting "Allow auto-merge" is OFF. Enable it in Settings → General → Pull Requests to use bot auto-merge.');
             }
 
-      - name: Check freeze status
+      - name: Check freeze status (freeze-state branch)
         uses: actions/checkout@v4
         with:
-          ref: lab
-          sparse-checkout: |
-            .ops/lab-freeze.json
+          ref: freeze-state
+          fetch-depth: 1
 
       - name: Gate: base=lab & label=auto-merge & not frozen
         uses: actions/github-script@v7
@@ -52,12 +51,12 @@ jobs:
             const hasLabel = pr.labels.some(l => l.name === 'auto-merge');
             const baseOk  = pr.base.ref === 'lab';
             
-            // Check freeze status
+            // Check freeze status from freeze-state branch
             let frozen = false;
             const fs = require('fs');
             if (fs.existsSync('.ops/lab-freeze.json')) {
               const freeze = JSON.parse(fs.readFileSync('.ops/lab-freeze.json', 'utf8'));
-              frozen = freeze.frozen;
+              frozen = freeze.frozen || false;
               if (frozen) {
                 core.warning(`Lab is frozen: ${freeze.reason}`);
               }
@@ -97,12 +96,11 @@ jobs:
     if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check freeze status
+      - name: Check freeze status (freeze-state branch)
         uses: actions/checkout@v4
         with:
-          ref: lab
-          sparse-checkout: |
-            .ops/lab-freeze.json
+          ref: freeze-state
+          fetch-depth: 1
 
       - name: Abort if frozen
         id: freeze-check

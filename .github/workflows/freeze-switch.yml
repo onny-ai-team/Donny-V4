@@ -16,18 +16,10 @@ jobs:
     if: github.event.label.name == 'freeze-lab'
     runs-on: ubuntu-latest
     steps:
-      - name: Check PAT configuration
-        run: |
-          if [ -z "${{ secrets.FREEZE_BOT_PAT }}" ]; then
-            echo "::error::❌ Missing FREEZE_BOT_PAT (classic PAT). Create a classic token with scope: repo (includes Bypass branch protections). Save as repo secret: FREEZE_BOT_PAT. Then re-apply/remove the freeze-lab label to retry."
-            exit 1
-          fi
-          echo "✅ FREEZE_BOT_PAT is configured"
-
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.FREEZE_BOT_PAT }}
-          ref: lab
+          ref: freeze-state
+          fetch-depth: 0
 
       - name: Process freeze toggle
         id: toggle
@@ -54,15 +46,9 @@ jobs:
 
       - name: Commit and push freeze state
         id: push
-        continue-on-error: true
         run: |
           git config user.name "freeze-bot"
           git config user.email "freeze-bot@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${{ secrets.FREEZE_BOT_PAT }}@github.com/${{ github.repository }}.git"
-          
-          # Fetch latest and ensure we're on lab
-          git fetch origin lab
-          git checkout lab
           
           # Stage and commit the freeze state change
           git add .ops/lab-freeze.json
@@ -71,17 +57,12 @@ jobs:
             echo "result=no-changes" >> $GITHUB_OUTPUT
           else
             FROZEN_STATE=$(jq -r .frozen .ops/lab-freeze.json)
-            git commit -m "freeze: set to $FROZEN_STATE by ${{ steps.toggle.outputs.actor }}"
+            git commit -m "freeze(state): set to $FROZEN_STATE by ${{ steps.toggle.outputs.actor }}" || echo "No changes"
             
-            # Push with error capture
-            if git push origin lab 2>push_error.txt; then
-              echo "result=success" >> $GITHUB_OUTPUT
-              echo "✅ Push successful"
-            else
-              echo "result=failed" >> $GITHUB_OUTPUT
-              cat push_error.txt
-              exit 1
-            fi
+            # Push to freeze-state branch (no protection, no PAT needed)
+            git push origin HEAD:freeze-state
+            echo "result=success" >> $GITHUB_OUTPUT
+            echo "✅ State updated on branch freeze-state"
           fi
 
       - name: Comment on trigger - Success
@@ -91,8 +72,8 @@ jobs:
           script: |
             const isFreezing = (context.payload.action === 'labeled');
             const body = isFreezing 
-              ? `🧊 Freeze ENABLED — Lab is now frozen.`
-              : `🧊 Freeze DISABLED — Lab is now open.`;
+              ? `🧊 Freeze ENABLED — Lab is now frozen (state updated on branch \`freeze-state\`).`
+              : `🧊 Freeze DISABLED — Lab is now open (state updated on branch \`freeze-state\`).`;
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -106,9 +87,8 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `❌ **Freeze toggle failed**: could not push to protected \`lab\`.\n` +
-              `Fix: create classic PAT with scope \`repo\` (includes Bypass branch protections), ` +
-              `save as secret \`FREEZE_BOT_PAT\`, then re-apply/remove \`freeze-lab\` to retry.`;
+            const body = `❌ **Freeze toggle failed**: could not update state on \`freeze-state\` branch.\n` +
+              `Check that the freeze-state branch exists and the workflow has permissions.`;
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
