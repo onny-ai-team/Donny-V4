@@ -73,7 +73,7 @@ jobs:
             const isFreezing = (context.payload.action === 'labeled');
             const body = isFreezing 
               ? `🧊 Freeze ENABLED — Lab is now frozen (state updated on branch \`freeze-state\`).`
-              : `🧊 Freeze DISABLED — Lab is now open (state updated on branch \`freeze-state\`).`;
+              : `✅ Freeze DISABLED — Lab is now open (state updated on branch \`freeze-state\`).`;
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -96,3 +96,25 @@ jobs:
               issue_number: context.issue.number,
               body: body
             });
+
+      - name: Comment on all open PRs about freeze state
+        if: steps.push.outcome == 'success' && steps.push.outputs.result != 'no-changes'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const isFreezing = (context.payload.action === 'labeled');
+            const state = isFreezing
+              ? "🧊 Lab is now FROZEN"
+              : "✅ Lab is now OPEN";
+            
+            // List all open PRs targeting lab
+            const prs = await github.rest.pulls.list({
+              owner, repo, state: "open", base: "lab"
+            });
+            for (const pr of prs.data) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: pr.number,
+                body: state
+              });
+            }
