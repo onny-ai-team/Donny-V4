@@ -29,3 +29,5 @@ node ops/tests/acceptance/smoke.mjs
 - Doctor: http://localhost:5056/lab/api/browser/health
 - <!-- ci trigger -->
 <!-- ci trigger 2 -->
+
+<!-- ci trigger auto-retry test -->
