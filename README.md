@@ -28,3 +28,4 @@ node ops/tests/acceptance/smoke.mjs
 - API: http://localhost:5055/api/health
 - Doctor: http://localhost:5056/lab/api/browser/health
 - <!-- ci trigger -->
+<!-- ci trigger 2 -->
