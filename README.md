@@ -31,3 +31,4 @@ node ops/tests/acceptance/smoke.mjs
 <!-- ci trigger 2 -->
 
 <!-- ci trigger auto-retry test -->
+<!-- auto-retry test after fix -->
