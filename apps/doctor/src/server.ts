@@ -23,6 +23,69 @@ app.get("/lab/api/packs/latest", (_req, res) => {
   }
 });
 
+// --- Packs History ---
+app.get("/lab/api/packs/history", (_req, res) => {
+  try {
+    const historyDir = path.join(__dirname, "../../../storage/acceptance/history");
+    const indexPath = path.join(historyDir, "index.json");
+    
+    if (!fs.existsSync(indexPath)) {
+      return res.json({ files: [], items: [] });
+    }
+    
+    const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+    const items = [];
+    
+    for (const filename of index.slice(0, 10)) {
+      try {
+        const filePath = path.join(historyDir, filename);
+        const pack = JSON.parse(fs.readFileSync(filePath, "utf8"));
+        items.push(pack);
+      } catch {}
+    }
+    
+    res.json({ files: index, items });
+  } catch (e: any) {
+    res.json({ files: [], items: [] });
+  }
+});
+
+// --- Last Green Pack ---
+app.get("/lab/api/packs/last-green", (_req, res) => {
+  try {
+    // Check latest first
+    const latestPath = path.join(__dirname, "../../../storage/acceptance/latest.json");
+    if (fs.existsSync(latestPath)) {
+      const latest = JSON.parse(fs.readFileSync(latestPath, "utf8"));
+      if (latest.pass === true) {
+        return res.json({ ok: true, sha: latest.ci?.sha || null, pack: latest });
+      }
+    }
+    
+    // Check history
+    const historyDir = path.join(__dirname, "../../../storage/acceptance/history");
+    const indexPath = path.join(historyDir, "index.json");
+    
+    if (fs.existsSync(indexPath)) {
+      const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+      
+      for (const filename of index) {
+        try {
+          const filePath = path.join(historyDir, filename);
+          const pack = JSON.parse(fs.readFileSync(filePath, "utf8"));
+          if (pack.pass === true) {
+            return res.json({ ok: true, sha: pack.ci?.sha || null, pack });
+          }
+        } catch {}
+      }
+    }
+    
+    res.json({ ok: false });
+  } catch (e: any) {
+    res.json({ ok: false });
+  }
+});
+
 // --- Gate Status Endpoint ---
 app.get("/lab/gate/status", (_req, res) => {
   try {
@@ -292,7 +355,7 @@ app.get("/lab/doctor/packs", async (_req,res)=>{
   try {
     const r = await fetch("http://localhost:5056/lab/api/packs/latest");
     const data = await r.json();
-    const body = packsHtml(data);
+    const body = await packsHtml(data);
     res.type("html").send(page("Packs", body));
   } catch(e) {
     const body = `<div class="card"><h2>Acceptance Packs</h2><div class=\"muted\">No pack found yet.</div></div>`;
