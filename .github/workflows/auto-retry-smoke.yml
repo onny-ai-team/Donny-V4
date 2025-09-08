@@ -43,7 +43,7 @@ jobs:
             const labels = (data.labels || []).map(l => l.name);
             core.setOutput('go', labels.includes('no-retry') ? 'false' : 'true');
         env:
-          numbers: ${{ steps.find.outputs.prs }}
+          numbers: ${{ steps.find.outputs.numbers }}
 
       - name: Re-run Smoke (1/1)
         if: ${{ steps.gate.outputs.go == 'true' }}
