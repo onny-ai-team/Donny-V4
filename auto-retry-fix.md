@@ -1,3 +1,10 @@
+# Auto-retry workflow fix
+
+The fixed workflow is ready but cannot be pushed due to OAuth token limitations.
+
+## Fixed workflow content:
+
+```yaml
 name: Auto-retry Smoke (one-time)
 
 on:
@@ -69,3 +76,6 @@ jobs:
             }
         env:
           numbers: ${{ steps.find.outputs.prs }}
+```
+
+Please create this file manually at: .github/workflows/auto-retry-smoke.yml
