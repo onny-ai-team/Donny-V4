@@ -1,13 +1,13 @@
-### Quick checks
-- [ ] All health endpoints GREEN (UI `/health`, API `/api/health`, Doctor `/lab/api/browser/health`)
-- [ ] Smoke test passes locally (`TARGET_HOST=99.76.234.25 node ops/tests/acceptance/smoke.mjs`)
+## Quick checks
+- [ ] All health endpoints GREEN (UI /health, API /api/health, Doctor /lab/api/browser/health)
+- [ ] Smoke test passes locally (`IMAGE=99.76.234.25 node ops/tests/acceptance/smoke.mjs`)
 - [ ] No secrets/keys in the diff
-- [ ] Doctor Packs show overall **PASS** at `/lab/doctor/packs`
-- [ ] Artifacts accessible (e.g., `/files/artifacts/...`)
+- [ ] Doctor Packs show overall PASS ✅ (lab/doctor/packs)
+- [ ] Artifacts accessible (e.g., /files/artifacts/*)
 - [ ] Includes link to acceptance pack (CI artifact) if relevant
 
-> Notes:
+## Notes
+(What changed + any risks)
 
----
-**Reviews**
-- [ ] At least 1 approval (auto-requested by CODEOWNERS)
+## Labels
+Add one: `ready-to-merge` (if green) or `needs-investigation` (if red)
