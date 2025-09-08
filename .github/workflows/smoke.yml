@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      TARGET_HOST: 99.76.234.25
+      TARGET_HOST: 127.0.0.1
 
     steps:
       - name: Checkout
