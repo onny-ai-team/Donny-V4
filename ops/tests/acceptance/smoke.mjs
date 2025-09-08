@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
-import { writeFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { writeFileSync, mkdirSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 /** ---- Helpers ---- **/
 function tryCurl(name, url) {
@@ -92,11 +92,37 @@ const pack = {
   results, // [{ name, url, ok, ms, body?/error?, thresholdMs, slow }]
   warnings, // ["⚠️ UI is slow: ...", ...]
   pass,
+  ci: {
+    sha: process.env.GITHUB_SHA || null,
+    runId: process.env.GITHUB_RUN_ID || null,
+    attempt: Number(process.env.GITHUB_RUN_ATTEMPT || 1) || 1
+  }
 };
 
 const outPath = `${process.cwd()}/storage/acceptance/latest.json`;
 mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(outPath, JSON.stringify(pack, null, 2));
+
+// Write to history
+const historyDir = `${process.cwd()}/storage/acceptance/history`;
+mkdirSync(historyDir, { recursive: true });
+
+const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+const historyFile = `${timestamp}.json`;
+const historyPath = join(historyDir, historyFile);
+writeFileSync(historyPath, JSON.stringify(pack, null, 2));
+
+// Update history index (keep last 10)
+const indexPath = join(historyDir, 'index.json');
+let index = [];
+if (existsSync(indexPath)) {
+  try {
+    index = JSON.parse(readFileSync(indexPath, 'utf8'));
+  } catch {}
+}
+index.unshift(historyFile);
+index = index.slice(0, 10); // Keep only 10 most recent
+writeFileSync(indexPath, JSON.stringify(index, null, 2));
 
 // Console summary
 console.log(`Wrote ${outPath}`);
