@@ -35,7 +35,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const numbers = JSON.parse(core.getInput('numbers'));
+            const numbers = JSON.parse(process.env.numbers || '[]');
             if (!numbers.length) { core.setOutput('go', 'true'); return; }
             const { owner, repo } = context.repo;
             const pr = numbers[0];
@@ -43,7 +43,7 @@ jobs:
             const labels = (data.labels || []).map(l => l.name);
             core.setOutput('go', labels.includes('no-retry') ? 'false' : 'true');
         env:
-          numbers: ${{ steps.find.outputs.numbers }}
+          numbers: ${{ steps.find.outputs.prs }}
 
       - name: Re-run Smoke (1/1)
         if: ${{ steps.gate.outputs.go == 'true' }}
@@ -60,7 +60,7 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
-            const nums = JSON.parse(core.getInput('numbers'));
+            const nums = JSON.parse(process.env.numbers || '[]');
             for (const n of nums) {
               await github.rest.issues.createComment({
                 owner, repo, issue_number: n,
