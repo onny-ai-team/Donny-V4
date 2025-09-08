@@ -28,22 +28,23 @@ jobs:
               owner, repo, commit_sha: sha,
               headers: { 'X-GitHub-Api-Version': '2022-11-28' }
             });
-            core.setOutput('prs', JSON.stringify(prs.data.map(p => p.number)));
+            const numbers = prs.data.map(p => p.number);
+            core.setOutput('prs', JSON.stringify(numbers));
 
       - name: Skip if PR labeled no-retry
         id: gate
         uses: actions/github-script@v7
+        env:
+          NUMBERS: ${{ steps.find.outputs.prs }}
         with:
           script: |
-            const numbers = JSON.parse(core.getInput('numbers'));
+            const numbers = JSON.parse(process.env.NUMBERS || '[]');
             if (!numbers.length) { core.setOutput('go', 'true'); return; }
             const { owner, repo } = context.repo;
             const pr = numbers[0];
             const { data } = await github.rest.issues.get({ owner, repo, issue_number: pr });
             const labels = (data.labels || []).map(l => l.name);
             core.setOutput('go', labels.includes('no-retry') ? 'false' : 'true');
-        env:
-          numbers: ${{ steps.find.outputs.numbers }}
 
       - name: Re-run Smoke (1/1)
         if: ${{ steps.gate.outputs.go == 'true' }}
@@ -52,20 +53,23 @@ jobs:
           script: |
             const { owner, repo } = context.repo;
             const run_id = context.payload.workflow_run.id;
-            await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun', { owner, repo, run_id });
+            await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun', {
+              owner, repo, run_id,
+              headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+            });
 
       - name: Comment on PR(s)
         if: ${{ steps.gate.outputs.go == 'true' && steps.find.outputs.prs != '[]' }}
         uses: actions/github-script@v7
+        env:
+          NUMBERS: ${{ steps.find.outputs.prs }}
         with:
           script: |
             const { owner, repo } = context.repo;
-            const nums = JSON.parse(core.getInput('numbers'));
+            const nums = JSON.parse(process.env.NUMBERS || '[]');
             for (const n of nums) {
               await github.rest.issues.createComment({
                 owner, repo, issue_number: n,
                 body: "🔁 Auto-retry: Smoke failed once, retrying automatically (1/1)."
               });
             }
-        env:
-          numbers: ${{ steps.find.outputs.prs }}
