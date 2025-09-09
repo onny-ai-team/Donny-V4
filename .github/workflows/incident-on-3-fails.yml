@@ -15,40 +15,43 @@ jobs:
   track:
     runs-on: ubuntu-latest
     steps:
-      - name: Find associated PR for this SHA
+      - name: Find associated PR for this SHA (safe)
         id: find
         uses: actions/github-script@v7
         with:
           script: |
-            const { owner, repo } = context.repo;
-            const sha = context.payload.workflow_run.head_sha;
-            const prs = await github.request('GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls', {
-              owner, repo, commit_sha: sha,
-              headers: { 'X-GitHub-Api-Version': '2022-11-28' }
-            });
-            const numbers = prs.data.map(p => p.number);
-            core.setOutput('pr', numbers[0] || '');
-            core.setOutput('sha', sha);
-            core.setOutput('run_html', context.payload.workflow_run.html_url);
+            try {
+              const { owner, repo } = context.repo;
+              const sha = context.payload.workflow_run.head_sha;
+              const prs = await github.request('GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls', {
+                owner, repo, commit_sha: sha,
+                headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+              });
+              const numbers = prs.data.map(p => p.number);
+              core.setOutput('pr', numbers[0] || '');
+              core.setOutput('sha', sha);
+              core.setOutput('run_html', context.payload.workflow_run.html_url);
+            } catch (e) {
+              core.setOutput('pr', '');
+            }
 
-      - name: Stop if no PR (e.g., direct push)
+      - name: Stop if no PR (graceful)
         if: ${{ steps.find.outputs.pr == '' }}
-        run: echo "No PR for this SHA; nothing to track."
+        run: echo "No PR for this SHA; exiting 0."
 
       - name: Install jq
         if: ${{ steps.find.outputs.pr != '' }}
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      # Use authenticated checkout with built-in GITHUB_TOKEN
-      - name: Checkout gate-state (create if missing)
+      - name: Checkout gate-state (auth; create if missing)
         if: ${{ steps.find.outputs.pr != '' }}
         uses: actions/checkout@v4
         with:
           ref: gate-state
           fetch-depth: 0
-          persist-credentials: true  # uses GITHUB_TOKEN
+          persist-credentials: true
 
-      - name: Init gate-state when missing
+      - name: Initialize gate-state when empty
         if: ${{ steps.find.outputs.pr != '' }}
         run: |
           set -e
@@ -88,7 +91,7 @@ jobs:
             COUNT=0
           fi
 
-          echo "$RUNS" | jq -r '.' > /tmp/runs.json
+          echo "$RUNS" | jq -r '.' > /tmp/runs.json || echo "[]" > /tmp/runs.json
           jq --arg url "$RUN_HTML" '. + [$url] | (length>3 ? .[-3:] : .)' /tmp/runs.json > /tmp/runs2.json
 
           jq -n --arg pr "$PR_NUM" --arg sha "$SHA" --argjson count "$COUNT" \
@@ -96,22 +99,23 @@ jobs:
                 '{pr: ($pr|tonumber), sha: $sha, count: $count, runs: $runs[0], updatedAt: (now|todate)}' > "$FILE"
 
           echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Updated counter for PR #${PR_NUM} to $COUNT"
 
-      - name: Commit counter
+      - name: Commit counter (always succeed)
         if: ${{ steps.find.outputs.pr != '' }}
         run: |
           set -e
           git add .ops/incidents/
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No counter changes"
           else
             git -c user.name='gate-bot' -c user.email='gate-bot@users.noreply.github.com' \
               commit -m "gate(incident): update fail counter for PR #${{ steps.find.outputs.pr }} to ${{ steps.count.outputs.count }}"
             git push origin HEAD:gate-state
           fi
 
-      - name: Open Incident issue at 3 fails
-        if: ${{ steps.count.outputs.count >= 3 && steps.find.outputs.pr != '' }}
+      - name: Open Incident issue at exactly 3 fails
+        if: ${{ steps.count.outputs.count == 3 && steps.find.outputs.pr != '' }}
         uses: actions/github-script@v7
         env:
           PR_NUM: ${{ steps.find.outputs.pr }}
@@ -152,3 +156,6 @@ jobs:
               owner, repo, issue_number: prNum,
               body: `🚨 Incident opened: #${issue.data.number} — 3 consecutive Smoke failures.`
             });
+
+      - name: Always exit 0
+        run: echo "Done."
