@@ -124,8 +124,8 @@ jobs:
           git push origin gate-state || true
           echo "counter committed (or no changes)"
 
-      - name: Open Incident issue at exactly 3 fails
-        if: ${{ steps.count.outputs.count == 3 && steps.find.outputs.pr != '' }}
+      - name: Open Incident issue when fail count ≥ 3
+        if: ${{ steps.count.outputs.count >= 3 && steps.find.outputs.pr != '' }}
         continue-on-error: true
         uses: actions/github-script@v7
         env:
@@ -144,7 +144,7 @@ jobs:
               const author = pr.data.user.login;
 
               const body = [
-                `⚠️ **Lab Gate Incident** — 3 consecutive Smoke failures`,
+                `⚠️ **Lab Gate Incident** — 3+ consecutive Smoke failures`,
                 ``,
                 `**PR:** #${prNum} (@${author})`,
                 `**SHA:** \`${sha}\``,
@@ -166,7 +166,7 @@ jobs:
 
               await github.rest.issues.createComment({
                 owner, repo, issue_number: prNum,
-                body: `🚨 Incident opened: #${issue.data.number} — 3 consecutive Smoke failures.`
+                body: `🚨 Incident opened: #${issue.data.number} — 3+ consecutive Smoke failures.`
               });
               core.info(`Incident #${issue.data.number} opened.`);
             } catch (e) {
