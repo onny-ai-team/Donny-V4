@@ -15,7 +15,7 @@ jobs:
   track:
     runs-on: ubuntu-latest
     steps:
-      - name: Short-circuit if no associated PR
+      - name: Find associated PR for this SHA
         id: find
         uses: actions/github-script@v7
         with:
@@ -27,46 +27,53 @@ jobs:
               headers: { 'X-GitHub-Api-Version': '2022-11-28' }
             });
             const numbers = prs.data.map(p => p.number);
-            core.setOutput('pr_json', JSON.stringify(numbers));
             core.setOutput('pr', numbers[0] || '');
             core.setOutput('sha', sha);
+            core.setOutput('run_html', context.payload.workflow_run.html_url);
 
-      - name: Stop if no PR
+      - name: Stop if no PR (e.g., direct push)
         if: ${{ steps.find.outputs.pr == '' }}
         run: echo "No PR for this SHA; nothing to track."
 
-      - name: Checkout gate-state branch (create if missing)
+      - name: Install jq
+        if: ${{ steps.find.outputs.pr != '' }}
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      # Use authenticated checkout with built-in GITHUB_TOKEN
+      - name: Checkout gate-state (create if missing)
+        if: ${{ steps.find.outputs.pr != '' }}
+        uses: actions/checkout@v4
+        with:
+          ref: gate-state
+          fetch-depth: 0
+          persist-credentials: true  # uses GITHUB_TOKEN
+
+      - name: Init gate-state when missing
         if: ${{ steps.find.outputs.pr != '' }}
         run: |
           set -e
-          git init .
-          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          # Try to fetch existing gate-state, else start from empty tree
-          if git ls-remote --exit-code origin gate-state >/dev/null 2>&1; then
-            git fetch origin gate-state --depth=1
-            git checkout -B gate-state origin/gate-state
-          else
-            git checkout --orphan gate-state
-            rm -rf *
+          if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+            echo "Initializing gate-state branch"
+            rm -rf ./*
             mkdir -p .ops/incidents
             git add -A
             git -c user.name='gate-bot' -c user.email='gate-bot@users.noreply.github.com' commit -m "chore: init gate-state"
-            git push -u origin gate-state
+            git push -u origin HEAD:gate-state
           fi
 
       - name: Update fail counter for this PR
         id: count
         if: ${{ steps.find.outputs.pr != '' }}
-        shell: bash
         env:
           PR_NUM: ${{ steps.find.outputs.pr }}
           SHA: ${{ steps.find.outputs.sha }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          RUN_HTML: ${{ github.event.workflow_run.html_url }}
+          RUN_HTML: ${{ steps.find.outputs.run_html }}
         run: |
           set -e
           mkdir -p .ops/incidents
           FILE=".ops/incidents/pr-${PR_NUM}.json"
+
           if [ -f "$FILE" ]; then
             COUNT=$(jq -r '.count // 0' "$FILE")
             RUNS=$(jq -c '.runs // []' "$FILE")
@@ -81,7 +88,6 @@ jobs:
             COUNT=0
           fi
 
-          # Keep last 3 run URLs
           echo "$RUNS" | jq -r '.' > /tmp/runs.json
           jq --arg url "$RUN_HTML" '. + [$url] | (length>3 ? .[-3:] : .)' /tmp/runs.json > /tmp/runs2.json
 
@@ -91,38 +97,40 @@ jobs:
 
           echo "count=$COUNT" >> $GITHUB_OUTPUT
 
-      - name: Commit updated counter
+      - name: Commit counter
         if: ${{ steps.find.outputs.pr != '' }}
         run: |
           set -e
           git add .ops/incidents/
           if git diff --staged --quiet; then
-            echo "No counter changes"
+            echo "No changes to commit"
           else
             git -c user.name='gate-bot' -c user.email='gate-bot@users.noreply.github.com' \
               commit -m "gate(incident): update fail counter for PR #${{ steps.find.outputs.pr }} to ${{ steps.count.outputs.count }}"
             git push origin HEAD:gate-state
           fi
 
-      - name: Open/Update Incident Issue at 3 fails
+      - name: Open Incident issue at 3 fails
         if: ${{ steps.count.outputs.count >= 3 && steps.find.outputs.pr != '' }}
         uses: actions/github-script@v7
+        env:
+          PR_NUM: ${{ steps.find.outputs.pr }}
+          SHA: ${{ steps.find.outputs.sha }}
+          RUN_HTML: ${{ steps.find.outputs.run_html }}
         with:
           script: |
             const { owner, repo } = context.repo;
-            const prNum = Number(core.getInput('pr', {required:false})) || Number(process.env.PR_NUM || 0);
+            const prNum = Number(process.env.PR_NUM);
             const sha = process.env.SHA;
-            const runUrl = context.payload.workflow_run.html_url;
+            const runUrl = process.env.RUN_HTML;
 
-            // Get PR info for author mention
             const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNum });
             const author = pr.data.user.login;
 
-            // Build body
             const body = [
               `⚠️ **Lab Gate Incident** — 3 consecutive Smoke failures`,
               ``,
-              `**PR:** #${prNum} (${author})`,
+              `**PR:** #${prNum} (@${author})`,
               `**SHA:** \`${sha}\``,
               `**Latest run:** ${runUrl}`,
               `**Doctor Pack:** http://99.76.234.25:5056/lab/api/packs/latest`,
@@ -131,11 +139,8 @@ jobs:
               `- [ ] Investigate failing endpoint/logs`,
               `- [ ] Fix and push`,
               `- [ ] Confirm gate is green`,
-              ``,
-              `cc @${author}`
             ].join('\n');
 
-            // Create issue
             const issue = await github.rest.issues.create({
               owner, repo,
               title: `Lab Gate Incident: PR #${prNum} (${sha.slice(0,7)})`,
@@ -143,11 +148,7 @@ jobs:
               labels: ['incident','smoke-failure','automated']
             });
 
-            // Comment on PR for visibility
             await github.rest.issues.createComment({
               owner, repo, issue_number: prNum,
               body: `🚨 Incident opened: #${issue.data.number} — 3 consecutive Smoke failures.`
             });
-        env:
-          PR_NUM: ${{ steps.find.outputs.pr }}
-          SHA: ${{ steps.find.outputs.sha }}
